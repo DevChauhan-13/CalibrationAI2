@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CalibrationAI — Single-file UI</title>
+  <style>
+    /* --- simple modern styles, Tailwind-ish feel --- */
+    :root{
+      --bg:#0b1220; --card:#0f1724; --muted:#94a3b8; --accent:#06b6d4; --accent2:#06b6d4;
+      --glass: rgba(255,255,255,0.03);
+    }
+    html,body{height:100%; margin:0; font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background: linear-gradient(180deg,#041024 0%, #071229 60%); color:#e6eef6;}
+    .container{max-width:1100px; margin:28px auto; padding:20px;}
+    header{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px}
+    .logo{display:flex; align-items:center; gap:12px}
+    .logo .badge{width:48px;height:48px;background:linear-gradient(90deg,#06b6d4,#7c3aed);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;color:white}
+    h1{font-size:20px;margin:0}
+    p.lead{margin:0;color:var(--muted);font-size:14px}
+
+    /* Upload card */
+    .card{background:var(--card); border-radius:12px; padding:18px; box-shadow: 0 4px 18px rgba(2,6,23,0.6); border: 1px solid rgba(255,255,255,0.03)}
+    .upload-area{border:2px dashed rgba(255,255,255,0.06); padding:28px; text-align:center; border-radius:12px; cursor:pointer; transition:all .18s}
+    .upload-area.drag{background:linear-gradient(90deg, rgba(6,182,212,0.06), rgba(124,58,237,0.04)) ; box-shadow:0 8px 30px rgba(6,182,212,0.05)}
+    .muted{color:var(--muted)}
+    .btn{background:linear-gradient(90deg,#06b6d4,#7c3aed); color:#06202a; padding:10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:600}
+    .btn.secondary{background:transparent; color:var(--muted); border:1px solid rgba(255,255,255,0.04)}
+
+    /* progress */
+    .progress-wrap{height:12px;background:rgba(255,255,255,0.03); border-radius:999px; overflow:hidden; margin-top:12px}
+    .progress-bar{height:100%; width:0%; background:linear-gradient(90deg,#06b6d4,#7c3aed); transition:width .3s ease}
+
+    /* dashboard grid */
+    .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:18px}
+    .card.small{padding:14px}
+    .value{font-size:22px; font-weight:700; margin-top:8px}
+    .label{font-size:12px; color:var(--muted)}
+
+    /* charts area */
+    .charts{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:18px}
+    .chart-img{width:100%; height:340px; object-fit:contain; background:var(--glass); border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:14px}
+
+    /* alerts */
+    .alerts-list{margin-top:12px}
+    .alert-pill{display:inline-block; padding:6px 10px; border-radius:999px; font-weight:600; font-size:12px}
+    .alert-critical{background:#dc2626;color:white}
+    .alert-warning{background:#f59e0b;color:black}
+    .alert-normal{background:#10b981;color:white}
+
+    /* responsive */
+    @media (max-width:900px){
+      .grid{grid-template-columns:1fr; }
+      .charts{grid-template-columns:1fr}
+      header{flex-direction:column; align-items:flex-start; gap:6px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <div class="badge">AI</div>
+        <div>
+          <h1>CalibrationAI</h1>
+          <p class="lead">Upload sensor CSV → anomaly detection, drift prediction, RUL & calibration reports</p>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center">
+        <button id="exportBtn" class="btn" title="Download last report">Export Report</button>
+        <button id="openHistory" class="btn secondary" title="View history (opens API)">History</button>
+      </div>
+    </header>
+
+    <!-- Upload card -->
+    <section class="card" id="uploadCard">
+      <div id="uploadArea" class="upload-area" tabindex="0">
+        <div style="font-size:28px; margin-bottom:6px">📤</div>
+        <div style="font-weight:700">Drop CSV here or click to upload</div>
+        <div class="muted" style="margin-top:6px">Temperature sensor CSV — required columns: timestamp, measured_value, ideal_value, offset, temperature, operating_hours, vibration, calibration_age, pressure_cycles</div>
+        <div style="margin-top:12px">
+          <input id="fileInput" type="file" accept=".csv" style="display:none" />
+          <button id="chooseBtn" class="btn" style="margin-top:12px">Choose File</button>
+        </div>
+
+        <div class="progress-wrap" style="display:none; margin-top:14px">
+          <div id="progressBar" class="progress-bar"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Processing / Dashboard -->
+    <section id="processing" style="display:none" class="card">
+      <div style="display:flex; align-items:center; gap:12px">
+        <div style="font-size:36px">🤖</div>
+        <div>
+          <div style="font-weight:700" id="processingTitle">Processing your data...</div>
+          <div class="muted" id="processingStage">Starting pipeline</div>
+        </div>
+      </div>
+
+      <div class="muted" style="margin-top:12px">Progress indicators below are for UX — actual pipeline runs on backend.</div>
+      <div class="progress-wrap" style="margin-top:12px">
+        <div id="procBar" class="progress-bar"></div>
+      </div>
+    </section>
+
+    <section id="dashboard" style="display:none">
+      <div class="grid">
+        <div class="card small">
+          <div class="label">Live Feed (measured)</div>
+          <div class="value" id="liveMeasured">—</div>
+          <div class="muted">Latest measured value</div>
+        </div>
+        <div class="card small">
+          <div class="label">Anomalies Detected</div>
+          <div class="value" id="anomalyType">—</div>
+          <div class="muted">Type of detected anomaly</div>
+        </div>
+        <div class="card small">
+          <div class="label">Alert Level</div>
+          <div class="value" id="alertLevel">—</div>
+          <div class="muted">CRITICAL / WARNING / NORMAL</div>
+        </div>
+      </div>
+
+      <div class="charts">
+        <div class="card">
+          <h3 style="margin:0 0 10px 0">Drift Over Time</h3>
+          <div id="driftChart" class="chart-img">No chart yet</div>
+        </div>
+        <div class="card">
+          <h3 style="margin:0 0 10px 0">RUL & Health</h3>
+          <div id="rulChart" class="chart-img">No chart yet</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:0 0 8px 0">Alerts (Recent)</h3>
+        <div id="alertsBox" class="alerts-list muted">No alerts</div>
+      </div>
+    </section>
+
+    <footer style="margin-top:18px; color:var(--muted); font-size:13px">Running against API base <span id="apiBaseEl"></span></footer>
+  </div>
+
+  <script>
+    // --- adjust if your backend is not localhost:8000 ---
+    const API_BASE = "http://localhost:8000";
+
+    document.getElementById('apiBaseEl').textContent = API_BASE;
+
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const chooseBtn = document.getElementById('chooseBtn');
+    const progressWrap = uploadArea.querySelector('.progress-wrap');
+    const progressBar = document.getElementById('progressBar');
+
+    const processing = document.getElementById('processing');
+    const procBar = document.getElementById('procBar');
+    const processingStage = document.getElementById('processingStage');
+    const processingTitle = document.getElementById('processingTitle');
+
+    const dashboard = document.getElementById('dashboard');
+    const liveMeasured = document.getElementById('liveMeasured');
+    const anomalyType = document.getElementById('anomalyType');
+    const alertLevel = document.getElementById('alertLevel');
+    const driftChart = document.getElementById('driftChart');
+    const rulChart = document.getElementById('rulChart');
+    const alertsBox = document.getElementById('alertsBox');
+    const exportBtn = document.getElementById('exportBtn');
+    const openHistory = document.getElementById('openHistory');
+
+    // drag/drop UX
+    uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('drag'); });
+    uploadArea.addEventListener('dragleave', (e) => { e.preventDefault(); uploadArea.classList.remove('drag'); });
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault(); uploadArea.classList.remove('drag');
+      const f = e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+
+    chooseBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      if (f) handleFile(f);
+    });
+
+    // helper: show processing UI
+    function showProcessing() {
+      document.getElementById('uploadCard').style.display = 'none';
+      processing.style.display = 'block';
+      dashboard.style.display = 'none';
+      procBar.style.width = '2%';
+      processingStage.textContent = 'Initializing...';
+    }
+
+    // helper: show dashboard UI
+    function showDashboard() {
+      processing.style.display = 'none';
+      dashboard.style.display = 'block';
+      document.getElementById('uploadCard').style.display = 'none';
+    }
+
+    // simulate staged progress while actual backend runs
+    function runStageSimulation() {
+      const stages = [
+        'Analyzing file structure...',
+        'Cleaning & preprocessing data...',
+        'Running anomaly detection...',
+        'Computing calibration offsets & corrections...',
+        'Predicting drift & RUL...',
+        'Generating report & charts...'
+      ];
+      let idx = 0;
+      processingStage.textContent = stages[0];
+      procBar.style.width = '10%';
+      const timer = setInterval(() => {
+        idx++;
+        if (idx < stages.length) {
+          processingStage.textContent = stages[idx];
+          procBar.style.width = `${10 + idx*14}%`;
+        } else {
+          clearInterval(timer);
+          procBar.style.width = '95%';
+        }
+      }, 900);
+      return timer;
+    }
+
+    // handle file: upload to backend
+    async function handleFile(file) {
+      // validation
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        alert('Please upload a CSV file.');
+        return;
+      }
+
+      // show processing UI
+      showProcessing();
+      progressWrap.style.display = 'block';
+      progressBar.style.width = '6%';
+      let simTimer = runStageSimulation();
+
+      // build form data
+      const form = new FormData();
+      form.append('file', file, file.name);
+
+      try {
+        // POST to backend
+        const resp = await fetch(API_BASE + '/upload_csv/', {
+          method: 'POST',
+          body: form
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(()=>({error:resp.statusText}));
+          throw new Error(err.error || resp.statusText || 'Upload failed');
+        }
+
+        const data = await resp.json();
+
+        // finalize simulation
+        clearInterval(simTimer);
+        procBar.style.width = '100%';
+        processingStage.textContent = 'Finalizing...';
+        progressBar.style.width = '100%';
+
+        // small delay for UX
+        await new Promise(r => setTimeout(r, 450));
+
+        // populate dashboard
+        const alerts = data.alerts || [];
+        const latest = (alerts.length>0) ? alerts[alerts.length-1] : null;
+
+        liveMeasured.textContent = latest?.measured ?? '—';
+        anomalyType.textContent = latest?.anomaly ?? 'Normal';
+        alertLevel.textContent = latest?.alert ?? 'NORMAL';
+
+        // color alert pill (append pill)
+        alertsBox.innerHTML = '';
+        if (latest) {
+          const pill = document.createElement('span');
+          pill.className = 'alert-pill ' + (latest.alert === 'CRITICAL' ? 'alert-critical' : (latest.alert === 'WARNING' ? 'alert-warning' : 'alert-normal'));
+          pill.textContent = `${latest.alert || 'NORMAL'} • ${latest.anomaly || 'none'}`;
+          alertsBox.appendChild(pill);
+
+          // add maintenance text below
+          const m = document.createElement('div');
+          m.style.marginTop = '8px';
+          m.style.color = 'var(--muted)';
+          m.textContent = latest.maintenance ? `Suggested: ${latest.maintenance}` : '';
+          alertsBox.appendChild(m);
+        } else {
+          alertsBox.textContent = 'No alerts';
+        }
+
+        // charts: backend usually returns chart_files like "/static/charts/drift.png"
+        const chartFiles = data.chart_files || {};
+        if (chartFiles.drift) {
+          driftChart.innerHTML = `<img src="${API_BASE}${chartFiles.drift}" alt="drift chart" style="width:100%; height:100%; object-fit:contain; border-radius:6px" />`;
+        } else if (chartFiles.drift_url) {
+          driftChart.innerHTML = `<img src="${chartFiles.drift_url}" alt="drift chart" style="width:100%; height:100%; object-fit:contain; border-radius:6px" />`;
+        } else {
+          driftChart.textContent = 'No drift chart';
+        }
+
+        if (chartFiles.rul_health) {
+          rulChart.innerHTML = `<img src="${API_BASE}${chartFiles.rul_health}" alt="rul chart" style="width:100%; height:100%; object-fit:contain; border-radius:6px" />`;
+        } else {
+          rulChart.textContent = 'No RUL chart';
+        }
+
+        // set export button link target
+        exportBtn.dataset.pdf = data.report_pdf_url ? (data.report_pdf_url.startsWith('/') ? data.report_pdf_url : ('/' + data.report_pdf_url)) : null;
+
+        // show UI
+        showDashboard();
+
+      } catch (err) {
+        console.error(err);
+        alert('Pipeline error: ' + (err.message || err));
+        // reset UI to upload
+        document.getElementById('uploadCard').style.display = 'block';
+        processing.style.display = 'none';
+      } finally {
+        // reset progress bar
+        progressBar.style.width = '0%';
+        progressWrap.style.display = 'none';
+      }
+    }
+
+    // export report handler
+    exportBtn.addEventListener('click', () => {
+      const pdfPath = exportBtn.dataset.pdf;
+      if (!pdfPath) {
+        alert('No report available yet. Upload a CSV and run the pipeline first.');
+        return;
+      }
+      // open in new tab
+      const url = (pdfPath.startsWith('http') || pdfPath.startsWith('/')) ? (pdfPath.startsWith('http')? pdfPath : API_BASE + pdfPath) : (API_BASE + '/' + pdfPath);
+      window.open(url, '_blank');
+    });
+
+    // open history view (simple)
+    openHistory.addEventListener('click', async () => {
+      try {
+        const res = await fetch(API_BASE + '/history/');
+        const data = await res.json();
+        const newest = data.slice(-5).reverse();
+        let txt = 'Latest rows (oldest→newest):\\n';
+        newest.forEach(r => {
+          txt += `${r.timestamp} | measured=${r.measured} | anomaly=${r.anomaly} | alert=${r.alert}\\n`;
+        });
+        alert(txt || 'No history.');
+      } catch (e) {
+        alert('Could not fetch history: ' + (e.message||e));
+      }
+    });
+
+    // keyboard accessibility: press Enter to open file picker
+    uploadArea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') fileInput.click();
+    });
+
+    // small safety: handle click on body to focus uploadArea
+    document.addEventListener('click', (e) => {
+      // noop
+    });
+  </script>
+</body>
+</html>
